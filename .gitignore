@@ -30,6 +30,12 @@ env/
 
 # Chat history and user data
 chat_history.json
+comparison_chat_history.json
+image_chat_history.json
+
+# Results directories
+analysis_results/
+comparison_results/
 
 # Streamlit
 .streamlit/

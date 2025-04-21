@@ -3,6 +3,7 @@ import os
 import tempfile
 import base64
 import json
+import uuid
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -193,6 +194,25 @@ def perform_ocr(image_path, lang='eng', preprocess=None):
     except Exception as e:
         return f"Error performing OCR: {e}"
 
+# Function to load image analysis chat history from disk
+def load_image_chat_history():
+    try:
+        if os.path.exists('image_chat_history.json'):
+            with open('image_chat_history.json', 'r') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        st.error(f"Error loading image chat history: {e}")
+        return []
+
+# Function to save image analysis chat history to disk
+def save_image_chat_history(history):
+    try:
+        with open('image_chat_history.json', 'w') as f:
+            json.dump(history, f)
+    except Exception as e:
+        st.error(f"Error saving image chat history: {e}")
+
 # Function to save analysis results
 def save_analysis_results(image_name, prompt, analysis, image_path=None):
     """Save analysis results to a JSON file"""
@@ -226,9 +246,64 @@ def save_analysis_results(image_name, prompt, analysis, image_path=None):
 
     return filename
 
+# Initialize session state for image analysis
+if 'image_chat_history' not in st.session_state:
+    st.session_state.image_chat_history = load_image_chat_history()
+if 'image_session_id' not in st.session_state:
+    st.session_state.image_session_id = str(uuid.uuid4())
+if 'current_images' not in st.session_state:
+    st.session_state.current_images = []
+
 # Main page content
 st.title("🖼️ Image Analysis")
 st.markdown("Upload images for detailed AI-powered analysis")
+
+# Create sidebar for chat history
+sidebar = st.sidebar
+sidebar.title("📋 Options & History")
+
+# Session ID display
+sidebar.markdown(f"**Session ID:** {st.session_state.image_session_id[:8]}")
+sidebar.markdown("*Images processed in this session will be cleared when you close the app.*")
+
+# Chat History Section in Sidebar
+sidebar.header("💬 Analysis History")
+if st.session_state.image_chat_history:
+    for i, entry in enumerate(st.session_state.image_chat_history[-10:]):
+        with sidebar.expander(f"{entry['image_name'][:20]}..."):
+            st.write(f"**Image:** {entry['image_name']}")
+            st.write(f"**Prompt:** {entry['prompt'][:50]}...")
+            st.write(f"**Analysis:** {entry['analysis'][:100]}...")
+            st.write(f"**Time:** {entry['timestamp']}")
+else:
+    sidebar.info("No analysis history yet. Analyze images to build history.")
+
+# Clear history button
+if st.session_state.image_chat_history and sidebar.button("Clear Analysis History"):
+    st.session_state.image_chat_history = []
+    save_image_chat_history([])
+    st.rerun()
+
+# Add navigation links
+st.markdown("""
+<div style='display: flex; gap: 1rem; margin-bottom: 1rem;'>
+    <a href='/' style='text-decoration: none;'>
+        <div style='background-color: #4CAF50; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📁 Document Management
+        </div>
+    </a>
+    <a href='/image_analysis' style='text-decoration: none;'>
+        <div style='background-color: #2196F3; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📷 Image Analysis
+        </div>
+    </a>
+    <a href='/document_comparison' style='text-decoration: none;'>
+        <div style='background-color: #9C27B0; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📊 Document Comparison
+        </div>
+    </a>
+</div>
+""", unsafe_allow_html=True)
 
 # Create tabs for different analysis types
 tab1, tab2, tab3 = st.tabs(["General Analysis", "Text Extraction", "Object Detection"])
@@ -277,7 +352,27 @@ with tab1:
 
                             # Save results
                             result_file = save_analysis_results(uploaded_file.name, analysis_prompt, analysis_result, tmp_path)
-                            show_status(f"Analysis saved to {result_file}", "success")
+
+                            # Add to chat history
+                            chat_entry = {
+                                "image_name": uploaded_file.name,
+                                "prompt": analysis_prompt,
+                                "analysis": analysis_result,
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "type": "general_analysis"
+                            }
+                            st.session_state.image_chat_history.append(chat_entry)
+                            save_image_chat_history(st.session_state.image_chat_history)
+
+                            # Add to current session images
+                            if uploaded_file.name not in [img["name"] for img in st.session_state.current_images]:
+                                st.session_state.current_images.append({
+                                    "name": uploaded_file.name,
+                                    "path": tmp_path,
+                                    "type": "general_analysis"
+                                })
+
+                            show_status(f"Analysis saved to {result_file} and added to history", "success")
 
                             # Download button
                             try:
@@ -386,7 +481,27 @@ with tab2:
                                 extraction_result,
                                 tmp_path
                             )
-                            show_status(f"Extraction saved to {result_file}", "success")
+
+                            # Add to chat history
+                            chat_entry = {
+                                "image_name": uploaded_file.name,
+                                "prompt": f"Text extraction using {method_used}",
+                                "analysis": extraction_result,
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "type": "text_extraction"
+                            }
+                            st.session_state.image_chat_history.append(chat_entry)
+                            save_image_chat_history(st.session_state.image_chat_history)
+
+                            # Add to current session images
+                            if uploaded_file.name not in [img["name"] for img in st.session_state.current_images]:
+                                st.session_state.current_images.append({
+                                    "name": uploaded_file.name,
+                                    "path": tmp_path,
+                                    "type": "text_extraction"
+                                })
+
+                            show_status(f"Extraction saved to {result_file} and added to history", "success")
 
                             # Download buttons
                             col1, col2 = st.columns(2)
@@ -479,7 +594,27 @@ with tab3:
 
                             # Save results
                             result_file = save_analysis_results(uploaded_file.name, detection_prompt, detection_result, tmp_path)
-                            show_status(f"Detection results saved to {result_file}", "success")
+
+                            # Add to chat history
+                            chat_entry = {
+                                "image_name": uploaded_file.name,
+                                "prompt": detection_prompt,
+                                "analysis": detection_result,
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "type": "object_detection"
+                            }
+                            st.session_state.image_chat_history.append(chat_entry)
+                            save_image_chat_history(st.session_state.image_chat_history)
+
+                            # Add to current session images
+                            if uploaded_file.name not in [img["name"] for img in st.session_state.current_images]:
+                                st.session_state.current_images.append({
+                                    "name": uploaded_file.name,
+                                    "path": tmp_path,
+                                    "type": "object_detection"
+                                })
+
+                            show_status(f"Detection results saved to {result_file} and added to history", "success")
 
                             # Download button
                             try:
@@ -496,7 +631,51 @@ with tab3:
 
 # Footer
 st.markdown("---")
+st.markdown("### 📊 Current Session Images")
+
+# Display current session images
+if st.session_state.current_images:
+    st.markdown(f"**Images in current session:** {len(st.session_state.current_images)}")
+
+    # Create columns for displaying images
+    cols = st.columns(3)
+
+    for i, img_data in enumerate(st.session_state.current_images):
+        col_idx = i % 3
+        with cols[col_idx]:
+            st.markdown(f"**{img_data['name']}**")
+            st.image(img_data['path'], width=150)
+            st.markdown(f"*Type: {img_data['type']}*")
+
+    # Add a button to clear session data
+    if st.button("Clear Session Data", key="clear_image_session"):
+        st.session_state.current_images = []
+        st.session_state.image_session_id = str(uuid.uuid4())
+        show_status("Session data cleared. You can upload new images.", "success")
+        st.rerun()
+else:
+    st.info("No images processed in the current session.")
+
+st.markdown("---")
 st.markdown("### 📊 Analysis History")
+
+# Add a button to clear analysis history
+if st.button("Clear Analysis History", key="clear_analysis_history"):
+    # Remove all analysis result files
+    if os.path.exists("analysis_results"):
+        try:
+            analysis_files = [f for f in os.listdir("analysis_results") if f.endswith(".json")]
+            for file in analysis_files:
+                try:
+                    os.remove(os.path.join("analysis_results", file))
+                except Exception as e:
+                    st.error(f"Error removing file {file}: {e}")
+            show_status("Analysis history cleared successfully!", "success")
+        except Exception as e:
+            st.error(f"Error clearing analysis history: {e}")
+    else:
+        st.info("No analysis history to clear.")
+    st.rerun()
 
 # Create analysis_results directory if it doesn't exist
 if not os.path.exists("analysis_results"):

@@ -234,6 +234,11 @@ st.markdown("""
             📷 Image Analysis
         </div>
     </a>
+    <a href='/document_comparison' style='text-decoration: none;'>
+        <div style='background-color: #9C27B0; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📊 Document Comparison
+        </div>
+    </a>
 </div>
 """, unsafe_allow_html=True)
 
@@ -249,6 +254,14 @@ if st.session_state.chat_history:
             st.write(f"**Question:** {entry['question']}")
             st.write(f"**Answer:** {entry['answer'][:100]}...")
             st.write(f"**Time:** {entry['timestamp']}")
+
+    # Clear history button
+    if sidebar.button("Clear Chat History"):
+        st.session_state.chat_history = []
+        save_chat_history([])
+        st.rerun()
+else:
+    sidebar.info("No chat history yet. Ask questions about your documents to build history.")
 
 # Filter Section in Sidebar
 sidebar.header("🔍 Filters")
@@ -291,6 +304,30 @@ with main_content:
 
     with upload_col:
         uploaded_files = st.file_uploader("Upload Documents", type=["pdf", "docx", "jpg", "png"], accept_multiple_files=True)
+
+        # Add a session ID display and clear button
+        if 'session_id' not in st.session_state:
+            st.session_state.session_id = str(uuid.uuid4())
+
+        st.caption(f"Session ID: {st.session_state.session_id[:8]}")
+        if "vector" in st.session_state and st.button("Clear Session Data"):
+            # Clear session data but keep chat history
+            if 'vector' in st.session_state:
+                del st.session_state.vector
+            if 'all_file_types' in st.session_state:
+                st.session_state.all_file_types = []
+            if 'all_file_names' in st.session_state:
+                st.session_state.all_file_names = []
+            if 'all_upload_dates' in st.session_state:
+                st.session_state.all_upload_dates = []
+            st.session_state.filters = {
+                'file_type': [],
+                'file_name': [],
+                'upload_date': []
+            }
+            st.session_state.session_id = str(uuid.uuid4())
+            show_status("Session data cleared. You can upload new documents.", "success")
+            st.rerun()
 
     with model_col:
         # Embedding model selection
@@ -418,24 +455,45 @@ if uploaded_files:
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         docs = splitter.split_documents(all_documents)
 
-        # Add metadata to each chunk based on its source document
-        for i, doc in enumerate(docs):
-            # Find which original document this chunk came from
-            # This is a simplification - in a real app you might need more sophisticated tracking
-            # Here we're assuming the order is preserved from the original documents to chunks
-            doc_index = 0
-            doc_count = 0
-            for j, count in enumerate([len(d) for d in all_documents]):
-                if i >= doc_count and i < doc_count + count:
-                    doc_index = j
-                    break
-                doc_count += count
+        # Create a mapping of which document came from which file
+        doc_to_file_map = {}
+        doc_index = 0
+
+        # For each original document, store its file information
+        for i, doc in enumerate(all_documents):
+            # Store the mapping from document to file index
+            doc_to_file_map[id(doc)] = doc_index
+
+            # If this is the last document from a file, increment the file index
+            if i < len(all_documents) - 1 and doc_index < len(all_file_ids) - 1:
+                # Check if the next document is from a different file
+                # We can use the metadata that might already exist in the document
+                current_source = doc.metadata.get('source', '')
+                next_source = all_documents[i+1].metadata.get('source', '')
+                if current_source != next_source and next_source != '':
+                    doc_index += 1
+
+        # Add metadata to each chunk
+        for doc in docs:
+            # Try to find the original document this chunk came from
+            # If we can't determine it, use the first file's information
+            file_index = 0
+
+            # Get the source document if available in metadata
+            source_doc_name = doc.metadata.get('source', '')
+
+            # Find matching file by name
+            if source_doc_name:
+                for idx, name in enumerate(all_file_names):
+                    if name == source_doc_name:
+                        file_index = idx
+                        break
 
             # Add metadata
-            doc.metadata["file_id"] = all_file_ids[doc_index] if doc_index < len(all_file_ids) else str(uuid.uuid4())
-            doc.metadata["file_name"] = all_file_names[doc_index] if doc_index < len(all_file_names) else "unknown"
-            doc.metadata["file_type"] = all_file_types[doc_index] if doc_index < len(all_file_types) else "unknown"
-            doc.metadata["upload_date"] = all_upload_dates[doc_index] if doc_index < len(all_upload_dates) else datetime.now().strftime("%Y-%m-%d")
+            doc.metadata["file_id"] = all_file_ids[file_index] if file_index < len(all_file_ids) else str(uuid.uuid4())
+            doc.metadata["file_name"] = all_file_names[file_index] if file_index < len(all_file_names) else "unknown"
+            doc.metadata["file_type"] = all_file_types[file_index] if file_index < len(all_file_types) else "unknown"
+            doc.metadata["upload_date"] = all_upload_dates[file_index] if file_index < len(all_upload_dates) else datetime.now().strftime("%Y-%m-%d")
 
         # Create embeddings based on selected model
         show_status(f"Using embedding model: {EMBEDDING_MODELS[embedding_model]['name']}", "info")
