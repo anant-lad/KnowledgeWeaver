@@ -290,7 +290,7 @@ with main_content:
     upload_col, model_col = st.columns([3, 2])
 
     with upload_col:
-        uploaded_file = st.file_uploader("Upload a Document", type=["pdf", "docx", "jpg", "png"])
+        uploaded_files = st.file_uploader("Upload Documents", type=["pdf", "docx", "jpg", "png"], accept_multiple_files=True)
 
     with model_col:
         # Embedding model selection
@@ -307,105 +307,135 @@ with main_content:
         st.markdown(f"**Dimensions:** {selected_model['dimensions']}")
         st.markdown(f"**Description:** {selected_model['description']}")
 
-if uploaded_file is not None:
-    # Show processing status
-    processing_status = st.empty()
-    processing_status.markdown(f"<div class='status-box info-box'>⏳ Processing {uploaded_file.name}...</div>", unsafe_allow_html=True)
+if uploaded_files:
+    # Initialize lists to collect all documents
+    all_documents = []
+    all_file_ids = []
+    all_file_types = []
+    all_file_names = []
+    all_upload_dates = []
 
-    try:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
+    # Process each uploaded file
+    for uploaded_file in uploaded_files:
+        # Show processing status
+        processing_status = st.empty()
+        processing_status.markdown(f"<div class='status-box info-box'>⏳ Processing {uploaded_file.name}...</div>", unsafe_allow_html=True)
 
-        # Get file extension and determine file type
-        file_extension = os.path.splitext(uploaded_file.name)[1].lower()
-        file_type = file_extension.replace('.', '')
-
-        # Current timestamp for upload date
-        upload_date = datetime.now().strftime("%Y-%m-%d")
-
-        # Process different file types
-        documents = []
         try:
-            if file_extension == ".pdf":
-                show_status(f"Processing PDF file: {uploaded_file.name}", "info")
-                loader = PyMuPDFLoader(tmp_path)
-                documents = loader.load()
-                show_status(f"Extracted {len(documents)} pages from PDF", "success")
-            elif file_extension == ".docx":
-                show_status(f"Processing Word document: {uploaded_file.name}", "info")
-                loader = UnstructuredWordDocumentLoader(tmp_path)
-                documents = loader.load()
-                show_status(f"Extracted content from Word document", "success")
-            elif file_extension in [".jpg", ".png"] and IMAGE_SUPPORT:
-                # Process image files using PIL
-                show_status(f"Processing image file: {uploaded_file.name}", "info")
-                try:
-                    img = Image.open(tmp_path)
-                    # Extract basic image information
-                    width, height = img.size
-                    format_info = img.format
-                    mode = img.mode
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_path = tmp_file.name
 
-                    # Create a simple text description of the image
-                    image_text = f"Image information:\nFormat: {format_info}\nSize: {width}x{height}\nMode: {mode}"
+            # Get file extension and determine file type
+            file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+            file_type = file_extension.replace('.', '')
 
-                    # Get base64 encoding of the image for multimodal embeddings
+            # Current timestamp for upload date
+            upload_date = datetime.now().strftime("%Y-%m-%d")
+
+            # Process different file types
+            documents = []
+            try:
+                if file_extension == ".pdf":
+                    show_status(f"Processing PDF file: {uploaded_file.name}", "info")
+                    loader = PyMuPDFLoader(tmp_path)
+                    documents = loader.load()
+                    show_status(f"Extracted {len(documents)} pages from PDF", "success")
+                elif file_extension == ".docx":
+                    show_status(f"Processing Word document: {uploaded_file.name}", "info")
+                    loader = UnstructuredWordDocumentLoader(tmp_path)
+                    documents = loader.load()
+                    show_status(f"Extracted content from Word document", "success")
+                elif file_extension in [".jpg", ".png"] and IMAGE_SUPPORT:
+                    # Process image files using PIL
+                    show_status(f"Processing image file: {uploaded_file.name}", "info")
                     try:
-                        image_base64 = get_image_base64(tmp_path)
-                        # Store the base64 encoding in metadata for multimodal embeddings
-                        image_metadata = {
-                            "source": uploaded_file.name,
-                            "image_base64": image_base64,
-                            "is_image": True,
-                            "width": width,
-                            "height": height,
-                            "format": format_info,
-                            "mode": mode
-                        }
-                    except Exception as base64_error:
-                        show_status(f"Warning: Could not create base64 encoding for image: {base64_error}", "warning")
-                        image_metadata = {"source": uploaded_file.name, "is_image": True}
+                        img = Image.open(tmp_path)
+                        # Extract basic image information
+                        width, height = img.size
+                        format_info = img.format
+                        mode = img.mode
 
-                    # Create a document with the image information
-                    documents = [Document(page_content=image_text, metadata=image_metadata)]
-                    show_status(f"Extracted metadata from image", "success")
-                except Exception as img_error:
-                    show_status(f"Error processing image: {img_error}", "error")
-                    st.exception(img_error)
-            else:
-                if file_extension in [".jpg", ".png"] and not IMAGE_SUPPORT:
-                    show_status("Image support is not available. PIL library is required for image processing.", "warning")
+                        # Create a simple text description of the image
+                        image_text = f"Image information:\nFormat: {format_info}\nSize: {width}x{height}\nMode: {mode}"
+
+                        # Get base64 encoding of the image for multimodal embeddings
+                        try:
+                            image_base64 = get_image_base64(tmp_path)
+                            # Store the base64 encoding in metadata for multimodal embeddings
+                            image_metadata = {
+                                "source": uploaded_file.name,
+                                "image_base64": image_base64,
+                                "is_image": True,
+                                "width": width,
+                                "height": height,
+                                "format": format_info,
+                                "mode": mode
+                            }
+                        except Exception as base64_error:
+                            show_status(f"Warning: Could not create base64 encoding for image: {base64_error}", "warning")
+                            image_metadata = {"source": uploaded_file.name, "is_image": True}
+
+                        # Create a document with the image information
+                        documents = [Document(page_content=image_text, metadata=image_metadata)]
+                        show_status(f"Extracted metadata from image", "success")
+                    except Exception as img_error:
+                        show_status(f"Error processing image: {img_error}", "error")
+                        st.exception(img_error)
                 else:
-                    show_status(f"Unsupported file type: {file_extension}", "error")
+                    if file_extension in [".jpg", ".png"] and not IMAGE_SUPPORT:
+                        show_status("Image support is not available. PIL library is required for image processing.", "warning")
+                    else:
+                        show_status(f"Unsupported file type: {file_extension}", "error")
 
-            if not documents:
-                show_status("No content could be extracted from the file.", "warning")
+                if documents:
+                    # Generate a unique file_id for the uploaded file
+                    file_id = str(uuid.uuid4())
 
+                    # Add to our collection lists
+                    all_documents.extend(documents)
+                    all_file_ids.append(file_id)
+                    all_file_types.append(file_type)
+                    all_file_names.append(uploaded_file.name)
+                    all_upload_dates.append(upload_date)
+
+                    show_status(f"Successfully processed {uploaded_file.name}", "success")
+                else:
+                    show_status(f"No content could be extracted from {uploaded_file.name}.", "warning")
+
+            except Exception as e:
+                show_status(f"Error processing file {uploaded_file.name}: {e}", "error")
+                st.exception(e)
         except Exception as e:
-            show_status(f"Error processing file: {e}", "error")
+            show_status(f"Error reading file {uploaded_file.name}: {e}", "error")
             st.exception(e)
-    except Exception as e:
-        show_status(f"Error reading file: {e}", "error")
-        st.exception(e)
-    finally:
-        # Clear the processing status
-        processing_status.empty()
+        finally:
+            # Clear the processing status
+            processing_status.empty()
 
-    if documents:
-        # Generate a unique file_id for the uploaded file
-        file_id = str(uuid.uuid4())
-
+    if all_documents:
         # Chunking
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        docs = splitter.split_documents(documents)
+        docs = splitter.split_documents(all_documents)
 
-        # Add metadata to each chunk
-        for doc in docs:
-            doc.metadata["file_id"] = file_id
-            doc.metadata["file_name"] = uploaded_file.name
-            doc.metadata["file_type"] = file_type
-            doc.metadata["upload_date"] = upload_date
+        # Add metadata to each chunk based on its source document
+        for i, doc in enumerate(docs):
+            # Find which original document this chunk came from
+            # This is a simplification - in a real app you might need more sophisticated tracking
+            # Here we're assuming the order is preserved from the original documents to chunks
+            doc_index = 0
+            doc_count = 0
+            for j, count in enumerate([len(d) for d in all_documents]):
+                if i >= doc_count and i < doc_count + count:
+                    doc_index = j
+                    break
+                doc_count += count
+
+            # Add metadata
+            doc.metadata["file_id"] = all_file_ids[doc_index] if doc_index < len(all_file_ids) else str(uuid.uuid4())
+            doc.metadata["file_name"] = all_file_names[doc_index] if doc_index < len(all_file_names) else "unknown"
+            doc.metadata["file_type"] = all_file_types[doc_index] if doc_index < len(all_file_types) else "unknown"
+            doc.metadata["upload_date"] = all_upload_dates[doc_index] if doc_index < len(all_upload_dates) else datetime.now().strftime("%Y-%m-%d")
 
         # Create embeddings based on selected model
         show_status(f"Using embedding model: {EMBEDDING_MODELS[embedding_model]['name']}", "info")
@@ -496,9 +526,8 @@ if uploaded_file is not None:
                         node_label="Document"
                     )
 
-                # Save vector and file_id in session
+                # Save vector in session (but not a specific file_id since we have multiple)
                 st.session_state.vector = vector_index
-                st.session_state.file_id = file_id
 
                 # Update available filters
                 if 'all_file_types' not in st.session_state:
@@ -508,15 +537,21 @@ if uploaded_file is not None:
                 if 'all_upload_dates' not in st.session_state:
                     st.session_state.all_upload_dates = []
 
-                if file_type not in st.session_state.all_file_types:
-                    st.session_state.all_file_types.append(file_type)
-                if uploaded_file.name not in st.session_state.all_file_names:
-                    st.session_state.all_file_names.append(uploaded_file.name)
-                if upload_date not in st.session_state.all_upload_dates:
-                    st.session_state.all_upload_dates.append(upload_date)
+                # Add all file types, names, and dates to session state
+                for file_type in all_file_types:
+                    if file_type not in st.session_state.all_file_types:
+                        st.session_state.all_file_types.append(file_type)
+
+                for file_name in all_file_names:
+                    if file_name not in st.session_state.all_file_names:
+                        st.session_state.all_file_names.append(file_name)
+
+                for upload_date in all_upload_dates:
+                    if upload_date not in st.session_state.all_upload_dates:
+                        st.session_state.all_upload_dates.append(upload_date)
 
                 vector_status.empty()
-                show_status(f"{uploaded_file.name} uploaded and processed successfully!", "success")
+                show_status(f"{len(uploaded_files)} document(s) uploaded and processed successfully!", "success")
 
             except (ClientError, ValueError) as e:
                 error_message = str(e)
@@ -580,9 +615,8 @@ if uploaded_file is not None:
                                 show_status(f"Adding document {i+1}/{len(docs)} to Neo4j...", "info")
                             vector_index.add_documents([doc])
 
-                        # Save vector and file_id in session
+                        # Save vector in session (but not a specific file_id since we have multiple)
                         st.session_state.vector = vector_index
-                        st.session_state.file_id = file_id
 
                         # Update available filters
                         if 'all_file_types' not in st.session_state:
@@ -592,15 +626,21 @@ if uploaded_file is not None:
                         if 'all_upload_dates' not in st.session_state:
                             st.session_state.all_upload_dates = []
 
-                        if file_type not in st.session_state.all_file_types:
-                            st.session_state.all_file_types.append(file_type)
-                        if uploaded_file.name not in st.session_state.all_file_names:
-                            st.session_state.all_file_names.append(uploaded_file.name)
-                        if upload_date not in st.session_state.all_upload_dates:
-                            st.session_state.all_upload_dates.append(upload_date)
+                        # Add all file types, names, and dates to session state
+                        for file_type in all_file_types:
+                            if file_type not in st.session_state.all_file_types:
+                                st.session_state.all_file_types.append(file_type)
+
+                        for file_name in all_file_names:
+                            if file_name not in st.session_state.all_file_names:
+                                st.session_state.all_file_names.append(file_name)
+
+                        for upload_date in all_upload_dates:
+                            if upload_date not in st.session_state.all_upload_dates:
+                                st.session_state.all_upload_dates.append(upload_date)
 
                         vector_status.empty()
-                        show_status(f"Vector index fixed and {uploaded_file.name} uploaded successfully!", "success")
+                        show_status(f"Vector index fixed and {len(uploaded_files)} document(s) uploaded successfully!", "success")
 
                     except Exception as inner_e:
                         vector_status.empty()
@@ -648,12 +688,8 @@ document_chain = create_stuff_documents_chain(llm, prompt)
 def build_filter_dict():
     filter_dict = {}
 
-    # Add file_id filter if we're not using other filters
-    if (not st.session_state.filters['file_type'] and
-        not st.session_state.filters['file_name'] and
-        not st.session_state.filters['upload_date'] and
-        "file_id" in st.session_state):
-        filter_dict["file_id"] = st.session_state.file_id
+    # We no longer add a default file_id filter since we're handling multiple files
+    # Only apply filters that the user has explicitly selected
 
     # Add other filters if selected
     if st.session_state.filters['file_type']:

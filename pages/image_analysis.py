@@ -236,72 +236,70 @@ tab1, tab2, tab3 = st.tabs(["General Analysis", "Text Extraction", "Object Detec
 with tab1:
     st.header("General Image Analysis")
 
-    # File uploader
-    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="general_analysis")
+    # File uploader with multiple file support
+    uploaded_files = st.file_uploader("Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="general_analysis")
 
-    if uploaded_file is not None:
-        # Save the uploaded file to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
-
-        # Display the image
-        st.markdown("<div class='image-container'>", unsafe_allow_html=True)
-        st.image(tmp_path, caption=uploaded_file.name)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Analysis options
+    if uploaded_files:
+        # Analysis options that apply to all images
         analysis_prompt = st.text_area(
             "Analysis Prompt",
             value="Please analyze this image in detail. Describe what you see, including objects, people, colors, and the overall scene.",
             height=100
         )
 
-        # Analysis button
-        if st.button("Analyze Image", key="analyze_general"):
-            with st.spinner("Analyzing image..."):
-                analysis_result = analyze_image_with_openai(tmp_path, analysis_prompt)
+        # Process each uploaded file
+        for uploaded_file in uploaded_files:
+            # Create a container for each image
+            image_container = st.container()
+            with image_container:
+                st.markdown(f"### Processing: {uploaded_file.name}")
 
-                if analysis_result:
-                    st.markdown("<div class='analysis-result'>", unsafe_allow_html=True)
-                    st.markdown("### Analysis Result")
-                    st.markdown(analysis_result)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                # Save the uploaded file to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
+                    tmp_file.write(uploaded_file.read())
+                    tmp_path = tmp_file.name
 
-                    # Save results
-                    result_file = save_analysis_results(uploaded_file.name, analysis_prompt, analysis_result, tmp_path)
-                    show_status(f"Analysis saved to {result_file}", "success")
+                # Display the image
+                st.markdown("<div class='image-container'>", unsafe_allow_html=True)
+                st.image(tmp_path, caption=uploaded_file.name)
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                    # Download button
-                    try:
-                        with open(result_file, "r") as f:
-                            st.download_button(
-                                label="📥 Download Analysis",
-                                data=f.read(),
-                                file_name=f"analysis_{uploaded_file.name.split('.')[0]}.json",
-                                mime="application/json"
-                            )
-                    except Exception as download_error:
-                        st.error(f"Error creating download button: {download_error}")
+                # Analysis button for this specific image
+                if st.button(f"Analyze Image", key=f"analyze_general_{uploaded_file.name}"):
+                    with st.spinner(f"Analyzing {uploaded_file.name}..."):
+                        analysis_result = analyze_image_with_openai(tmp_path, analysis_prompt)
+
+                        if analysis_result:
+                            st.markdown("<div class='analysis-result'>", unsafe_allow_html=True)
+                            st.markdown("### Analysis Result")
+                            st.markdown(analysis_result)
+                            st.markdown("</div>", unsafe_allow_html=True)
+
+                            # Save results
+                            result_file = save_analysis_results(uploaded_file.name, analysis_prompt, analysis_result, tmp_path)
+                            show_status(f"Analysis saved to {result_file}", "success")
+
+                            # Download button
+                            try:
+                                with open(result_file, "r") as f:
+                                    st.download_button(
+                                        label="📥 Download Analysis",
+                                        data=f.read(),
+                                        file_name=f"analysis_{uploaded_file.name.split('.')[0]}.json",
+                                        mime="application/json",
+                                        key=f"download_analysis_{uploaded_file.name}"
+                                    )
+                            except Exception as download_error:
+                                st.error(f"Error creating download button: {download_error}")
 
 with tab2:
     st.header("Text Extraction from Images")
 
-    # File uploader
-    uploaded_file = st.file_uploader("Upload an image containing text", type=["jpg", "jpeg", "png"], key="text_extraction")
+    # File uploader with multiple file support
+    uploaded_files = st.file_uploader("Upload images containing text", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="text_extraction")
 
-    if uploaded_file is not None:
-        # Save the uploaded file to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
-
-        # Display the image
-        st.markdown("<div class='image-container'>", unsafe_allow_html=True)
-        st.image(tmp_path, caption=uploaded_file.name)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Extraction options
+    if uploaded_files:
+        # Extraction options that apply to all images
         extraction_method = st.radio(
             "Extraction Method",
             options=["AI-based (GPT-4 Vision)", "OCR (Tesseract)"],
@@ -340,82 +338,91 @@ with tab2:
                 }
                 preprocess_param = preprocess_map[preprocessing]
 
-        # Analysis button
-        if st.button("Extract Text", key="extract_text"):
-            with st.spinner("Extracting text from image..."):
-                if extraction_method == "AI-based (GPT-4 Vision)":
-                    # Use GPT-4 Vision for extraction
-                    extraction_prompt = "Please extract all text visible in this image. Format it properly maintaining paragraphs, bullet points, and tables if present."
-                    extraction_result = analyze_image_with_openai(tmp_path, extraction_prompt)
-                    method_used = "AI-based extraction (GPT-4 Vision)"
-                else:
-                    # Use OCR for extraction
-                    if OCR_SUPPORT:
-                        extraction_result = perform_ocr(tmp_path, lang=ocr_lang, preprocess=preprocess_param)
-                        method_used = f"OCR (Tesseract) with {preprocessing} preprocessing, language: {ocr_lang}"
-                    else:
-                        extraction_result = "OCR is not available. Please install the required libraries."
-                        method_used = "OCR (failed - libraries not available)"
+        # Process each uploaded file
+        for uploaded_file in uploaded_files:
+            # Create a container for each image
+            image_container = st.container()
+            with image_container:
+                st.markdown(f"### Processing: {uploaded_file.name}")
 
-                if extraction_result:
-                    st.markdown("<div class='analysis-result'>", unsafe_allow_html=True)
-                    st.markdown("### Extracted Text")
-                    st.markdown(f"*Method: {method_used}*")
-                    st.markdown(extraction_result)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                # Save the uploaded file to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
+                    tmp_file.write(uploaded_file.read())
+                    tmp_path = tmp_file.name
 
-                    # Save results
-                    result_file = save_analysis_results(
-                        uploaded_file.name,
-                        f"Text extraction using {method_used}",
-                        extraction_result,
-                        tmp_path
-                    )
-                    show_status(f"Extraction saved to {result_file}", "success")
+                # Display the image
+                st.markdown("<div class='image-container'>", unsafe_allow_html=True)
+                st.image(tmp_path, caption=uploaded_file.name)
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                    # Download buttons
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        try:
-                            with open(result_file, "r") as f:
-                                st.download_button(
-                                    label="📥 Download as JSON",
-                                    data=f.read(),
-                                    file_name=f"text_extraction_{uploaded_file.name.split('.')[0]}.json",
-                                    mime="application/json"
-                                )
-                        except Exception as download_error:
-                            st.error(f"Error creating JSON download button: {download_error}")
+                # Extract text button for this specific image
+                if st.button(f"Extract Text", key=f"extract_text_{uploaded_file.name}"):
+                    with st.spinner(f"Extracting text from {uploaded_file.name}..."):
+                        if extraction_method == "AI-based (GPT-4 Vision)":
+                            # Use GPT-4 Vision for extraction
+                            extraction_prompt = "Please extract all text visible in this image. Format it properly maintaining paragraphs, bullet points, and tables if present."
+                            extraction_result = analyze_image_with_openai(tmp_path, extraction_prompt)
+                            method_used = "AI-based extraction (GPT-4 Vision)"
+                        else:
+                            # Use OCR for extraction
+                            if OCR_SUPPORT:
+                                extraction_result = perform_ocr(tmp_path, lang=ocr_lang, preprocess=preprocess_param)
+                                method_used = f"OCR (Tesseract) with {preprocessing} preprocessing, language: {ocr_lang}"
+                            else:
+                                extraction_result = "OCR is not available. Please install the required libraries."
+                                method_used = "OCR (failed - libraries not available)"
 
-                    with col2:
-                        try:
-                            st.download_button(
-                                label="📥 Download as Text",
-                                data=extraction_result,
-                                file_name=f"text_extraction_{uploaded_file.name.split('.')[0]}.txt",
-                                mime="text/plain"
+                        if extraction_result:
+                            st.markdown("<div class='analysis-result'>", unsafe_allow_html=True)
+                            st.markdown("### Extracted Text")
+                            st.markdown(f"*Method: {method_used}*")
+                            st.markdown(extraction_result)
+                            st.markdown("</div>", unsafe_allow_html=True)
+
+                            # Save results
+                            result_file = save_analysis_results(
+                                uploaded_file.name,
+                                f"Text extraction using {method_used}",
+                                extraction_result,
+                                tmp_path
                             )
-                        except Exception as download_error:
-                            st.error(f"Error creating text download button: {download_error}")
+                            show_status(f"Extraction saved to {result_file}", "success")
+
+                            # Download buttons
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                try:
+                                    with open(result_file, "r") as f:
+                                        st.download_button(
+                                            label="📥 Download as JSON",
+                                            data=f.read(),
+                                            file_name=f"text_extraction_{uploaded_file.name.split('.')[0]}.json",
+                                            mime="application/json",
+                                            key=f"download_json_{uploaded_file.name}"
+                                        )
+                                except Exception as download_error:
+                                    st.error(f"Error creating JSON download button: {download_error}")
+
+                            with col2:
+                                try:
+                                    st.download_button(
+                                        label="📥 Download as Text",
+                                        data=extraction_result,
+                                        file_name=f"text_extraction_{uploaded_file.name.split('.')[0]}.txt",
+                                        mime="text/plain",
+                                        key=f"download_text_{uploaded_file.name}"
+                                    )
+                                except Exception as download_error:
+                                    st.error(f"Error creating text download button: {download_error}")
 
 with tab3:
     st.header("Object Detection")
 
-    # File uploader
-    uploaded_file = st.file_uploader("Upload an image for object detection", type=["jpg", "jpeg", "png"], key="object_detection")
+    # File uploader with multiple file support
+    uploaded_files = st.file_uploader("Upload images for object detection", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="object_detection")
 
-    if uploaded_file is not None:
-        # Save the uploaded file to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
-
-        # Display the image
-        st.markdown("<div class='image-container'>", unsafe_allow_html=True)
-        st.image(tmp_path, caption=uploaded_file.name)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Analysis options
+    if uploaded_files:
+        # Detection options that apply to all images
         detection_type = st.selectbox(
             "Detection Type",
             options=["General Objects", "People and Faces", "Text and Signs", "Products and Logos", "Custom"],
@@ -430,44 +437,62 @@ with tab3:
                 height=100
             )
 
-        # Analysis button
-        if st.button("Detect Objects", key="detect_objects"):
-            with st.spinner("Detecting objects in image..."):
-                # Set prompt based on detection type
-                if detection_type == "General Objects":
-                    detection_prompt = "Please identify and list all objects in this image. For each object, provide: 1) Object name, 2) Approximate location in the image, 3) Brief description."
-                elif detection_type == "People and Faces":
-                    detection_prompt = "Please identify all people in this image. For each person, describe: 1) Position in the image, 2) Approximate age group, 3) What they're wearing, 4) What they're doing. Do NOT include names or specific identities."
-                elif detection_type == "Text and Signs":
-                    detection_prompt = "Please identify all text, signs, and written content in this image. For each text element, provide: 1) The text content, 2) Location in the image, 3) Type (sign, label, etc.)."
-                elif detection_type == "Products and Logos":
-                    detection_prompt = "Please identify all products and logos in this image. For each item, provide: 1) Brand/product name if identifiable, 2) Location in the image, 3) Brief description."
-                else:
-                    detection_prompt = custom_prompt
+        # Process each uploaded file
+        for uploaded_file in uploaded_files:
+            # Create a container for each image
+            image_container = st.container()
+            with image_container:
+                st.markdown(f"### Processing: {uploaded_file.name}")
 
-                detection_result = analyze_image_with_openai(tmp_path, detection_prompt)
+                # Save the uploaded file to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
+                    tmp_file.write(uploaded_file.read())
+                    tmp_path = tmp_file.name
 
-                if detection_result:
-                    st.markdown("<div class='analysis-result'>", unsafe_allow_html=True)
-                    st.markdown("### Detection Results")
-                    st.markdown(detection_result)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                # Display the image
+                st.markdown("<div class='image-container'>", unsafe_allow_html=True)
+                st.image(tmp_path, caption=uploaded_file.name)
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                    # Save results
-                    result_file = save_analysis_results(uploaded_file.name, detection_prompt, detection_result, tmp_path)
-                    show_status(f"Detection results saved to {result_file}", "success")
+                # Detect objects button for this specific image
+                if st.button(f"Detect Objects", key=f"detect_objects_{uploaded_file.name}"):
+                    with st.spinner(f"Detecting objects in {uploaded_file.name}..."):
+                        # Set prompt based on detection type
+                        if detection_type == "General Objects":
+                            detection_prompt = "Please identify and list all objects in this image. For each object, provide: 1) Object name, 2) Approximate location in the image, 3) Brief description."
+                        elif detection_type == "People and Faces":
+                            detection_prompt = "Please identify all people in this image. For each person, describe: 1) Position in the image, 2) Approximate age group, 3) What they're wearing, 4) What they're doing. Do NOT include names or specific identities."
+                        elif detection_type == "Text and Signs":
+                            detection_prompt = "Please identify all text, signs, and written content in this image. For each text element, provide: 1) The text content, 2) Location in the image, 3) Type (sign, label, etc.)."
+                        elif detection_type == "Products and Logos":
+                            detection_prompt = "Please identify all products and logos in this image. For each item, provide: 1) Brand/product name if identifiable, 2) Location in the image, 3) Brief description."
+                        else:
+                            detection_prompt = custom_prompt
 
-                    # Download button
-                    try:
-                        with open(result_file, "r") as f:
-                            st.download_button(
-                                label="📥 Download Detection Results",
-                                data=f.read(),
-                                file_name=f"object_detection_{uploaded_file.name.split('.')[0]}.json",
-                                mime="application/json"
-                            )
-                    except Exception as download_error:
-                        st.error(f"Error creating download button: {download_error}")
+                        detection_result = analyze_image_with_openai(tmp_path, detection_prompt)
+
+                        if detection_result:
+                            st.markdown("<div class='analysis-result'>", unsafe_allow_html=True)
+                            st.markdown("### Detection Results")
+                            st.markdown(detection_result)
+                            st.markdown("</div>", unsafe_allow_html=True)
+
+                            # Save results
+                            result_file = save_analysis_results(uploaded_file.name, detection_prompt, detection_result, tmp_path)
+                            show_status(f"Detection results saved to {result_file}", "success")
+
+                            # Download button
+                            try:
+                                with open(result_file, "r") as f:
+                                    st.download_button(
+                                        label="📥 Download Detection Results",
+                                        data=f.read(),
+                                        file_name=f"object_detection_{uploaded_file.name.split('.')[0]}.json",
+                                        mime="application/json",
+                                        key=f"download_detection_{uploaded_file.name}"
+                                    )
+                            except Exception as download_error:
+                                st.error(f"Error creating download button: {download_error}")
 
 # Footer
 st.markdown("---")
