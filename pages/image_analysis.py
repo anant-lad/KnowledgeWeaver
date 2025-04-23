@@ -481,34 +481,50 @@ with tab2:
 
     if uploaded_files:
         # Extraction options that apply to all images
+        if 'text_extraction_method' not in st.session_state:
+            st.session_state.text_extraction_method = "AI-based (GPT-4 Vision)"
+
         extraction_method = st.radio(
             "Extraction Method",
             options=["AI-based (GPT-4 Vision)", "OCR (Tesseract)"],
             index=0,
+            key="text_extraction_radio",
             help="Choose between AI-based extraction or traditional OCR"
         )
+        st.session_state.text_extraction_method = extraction_method
 
         if extraction_method == "OCR (Tesseract)" and OCR_SUPPORT:
             # OCR options
             col1, col2 = st.columns(2)
             with col1:
+                if 'text_ocr_lang' not in st.session_state:
+                    st.session_state.text_ocr_lang = "eng"
+
                 ocr_lang = st.selectbox(
                     "OCR Language",
                     options=["eng", "fra", "deu", "spa", "ita", "por", "rus", "jpn", "kor", "chi_sim"],
                     index=0,
+                    key="text_ocr_lang_select",
                     format_func=lambda x: {
                         "eng": "English", "fra": "French", "deu": "German",
                         "spa": "Spanish", "ita": "Italian", "por": "Portuguese",
                         "rus": "Russian", "jpn": "Japanese", "kor": "Korean", "chi_sim": "Chinese (Simplified)"
                     }.get(x, x)
                 )
+                st.session_state.text_ocr_lang = ocr_lang
+
             with col2:
+                if 'text_preprocessing' not in st.session_state:
+                    st.session_state.text_preprocessing = "None"
+
                 preprocessing = st.selectbox(
                     "Image Preprocessing",
                     options=["None", "Threshold", "Blur", "Adaptive Threshold"],
                     index=0,
+                    key="text_preprocessing_select",
                     format_func=lambda x: x if x != "None" else "No Preprocessing"
                 )
+                st.session_state.text_preprocessing = preprocessing
 
                 # Map preprocessing options to function parameters
                 preprocess_map = {
@@ -517,7 +533,12 @@ with tab2:
                     "Blur": "blur",
                     "Adaptive Threshold": "adaptive"
                 }
-                preprocess_param = preprocess_map[preprocessing]
+
+                # Store the mapped value in a different session state variable
+                if 'text_preprocess_param' not in st.session_state:
+                    st.session_state.text_preprocess_param = None
+
+                st.session_state.text_preprocess_param = preprocess_map[preprocessing]
 
         # Process each uploaded file
         for uploaded_file in uploaded_files:
@@ -547,6 +568,11 @@ with tab2:
                         else:
                             # Use OCR for extraction
                             if OCR_SUPPORT:
+                                # Get values from session state
+                                ocr_lang = st.session_state.text_ocr_lang
+                                preprocessing = st.session_state.text_preprocessing
+                                preprocess_param = st.session_state.text_preprocess_param
+
                                 extraction_result = perform_ocr(tmp_path, lang=ocr_lang, preprocess=preprocess_param)
                                 method_used = f"OCR (Tesseract) with {preprocessing} preprocessing, language: {ocr_lang}"
                             else:

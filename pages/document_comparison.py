@@ -278,7 +278,7 @@ def extract_text_from_document(file_path, file_extension):
 
         elif file_extension in [".jpg", ".jpeg", ".png"] and IMAGE_SUPPORT:
             # For images, use OCR or AI-based extraction
-            extraction_method = st.session_state.get('extraction_method', 'AI-based')
+            extraction_method = st.session_state.get('doc_extraction_method', 'AI-based')
             extracted_text = ""
 
             if extraction_method == 'AI-based':
@@ -292,8 +292,8 @@ def extract_text_from_document(file_path, file_extension):
             else:
                 # Use OCR for extraction
                 if OCR_SUPPORT:
-                    lang = st.session_state.get('ocr_lang', 'eng')
-                    preprocess = st.session_state.get('preprocess_param', None)
+                    lang = st.session_state.get('doc_ocr_lang', 'eng')
+                    preprocess = st.session_state.get('doc_preprocess_param', None)
 
                     # Show what method is being used
                     preprocess_name = preprocess if preprocess else "None"
@@ -693,17 +693,23 @@ with tab1:
         extraction_col1, extraction_col2 = st.columns(2)
 
         with extraction_col1:
+            if 'doc_extraction_method' not in st.session_state:
+                st.session_state.doc_extraction_method = "AI-based"
+
             extraction_method = st.radio(
                 "Extraction Method",
                 options=["AI-based", "OCR"],
                 index=0,
-                key="extraction_method",
+                key="doc_extraction_radio",
                 help="Choose between AI-based extraction or traditional OCR"
             )
-            st.session_state.extraction_method = extraction_method
+            st.session_state.doc_extraction_method = extraction_method
 
         with extraction_col2:
             if extraction_method == "OCR" and OCR_SUPPORT:
+                if 'doc_ocr_lang' not in st.session_state:
+                    st.session_state.doc_ocr_lang = "eng"
+
                 ocr_lang = st.selectbox(
                     "OCR Language",
                     options=["eng", "fra", "deu", "spa", "ita", "por", "rus", "jpn", "kor", "chi_sim"],
@@ -713,17 +719,21 @@ with tab1:
                         "spa": "Spanish", "ita": "Italian", "por": "Portuguese",
                         "rus": "Russian", "jpn": "Japanese", "kor": "Korean", "chi_sim": "Chinese (Simplified)"
                     }.get(x, x),
-                    key="ocr_lang"
+                    key="doc_ocr_lang_select"
                 )
-                st.session_state.ocr_lang = ocr_lang
+                st.session_state.doc_ocr_lang = ocr_lang
+
+                if 'doc_preprocessing' not in st.session_state:
+                    st.session_state.doc_preprocessing = "None"
 
                 preprocessing = st.selectbox(
                     "Image Preprocessing",
                     options=["None", "Threshold", "Blur", "Adaptive Threshold"],
                     index=0,
                     format_func=lambda x: x if x != "None" else "No Preprocessing",
-                    key="preprocessing"
+                    key="doc_preprocessing_select"
                 )
+                st.session_state.doc_preprocessing = preprocessing
 
                 # Map preprocessing options to function parameters
                 preprocess_map = {
@@ -732,7 +742,12 @@ with tab1:
                     "Blur": "blur",
                     "Adaptive Threshold": "adaptive"
                 }
-                st.session_state.preprocess_param = preprocess_map[preprocessing]
+
+                # Store the mapped value in a different session state variable
+                if 'doc_preprocess_param' not in st.session_state:
+                    st.session_state.doc_preprocess_param = None
+
+                st.session_state.doc_preprocess_param = preprocess_map[preprocessing]
 
     # Process button
     if uploaded_files and len(uploaded_files) >= 2:
