@@ -18,6 +18,13 @@ from langchain_core.documents import Document
 from neo4j.exceptions import ClientError
 import base64
 
+# Import authentication utilities
+from utils.auth_utils import (
+    initialize_auth_state, get_current_user, create_initial_admin,
+    logout_user
+)
+from utils.auth_components import render_auth_page
+
 # Try to import image processing libraries, but make them optional
 IMAGE_SUPPORT = False
 try:
@@ -122,12 +129,21 @@ def check_and_fix_neo4j_database(url, username, password):
         if 'driver' in locals():
             driver.close()
 
+# Set page config (must be the first Streamlit command)
+st.set_page_config(page_title="KnowledgeWeaver", layout="wide")
+
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-neo4j_url = os.getenv("NEO4J_URL")
+neo4j_url = os.getenv("NEO4J_URI")  # Using NEO4J_URI from .env file
 neo4j_user = os.getenv("NEO4J_USER")
 neo4j_password = os.getenv("NEO4J_PASSWORD")
+
+# Initialize authentication state
+initialize_auth_state()
+
+# Create initial admin user if no users exist
+create_initial_admin(neo4j_url, neo4j_user, neo4j_password)
 
 # Initialize session state for chat history if it doesn't exist
 if 'chat_history' not in st.session_state:
@@ -140,6 +156,27 @@ if 'filters' not in st.session_state:
         'file_name': [],
         'upload_date': []
     }
+
+# Initialize auth popup state
+if 'show_auth_popup' not in st.session_state:
+    st.session_state.show_auth_popup = False
+
+if 'auth_popup_mode' not in st.session_state:
+    st.session_state.auth_popup_mode = "login"
+
+# Handle JavaScript messages
+if st.query_params.get("auth") == ["login"]:
+    st.session_state.show_auth_popup = True
+    st.session_state.auth_popup_mode = "login"
+    # Clear the query parameter
+    st.query_params.clear()
+    st.rerun()
+elif st.query_params.get("auth") == ["signup"]:
+    st.session_state.show_auth_popup = True
+    st.session_state.auth_popup_mode = "signup"
+    # Clear the query parameter
+    st.query_params.clear()
+    st.rerun()
 
 # Function to load chat history from disk
 def load_chat_history():
@@ -165,7 +202,6 @@ if len(st.session_state.chat_history) == 0:
     st.session_state.chat_history = load_chat_history()
 
 # App UI
-st.set_page_config(page_title="KnowledgeWeaver", layout="wide")
 
 # Custom CSS for better spacing and readability
 st.markdown("""
@@ -221,84 +257,135 @@ def show_status(message, status_type="info"):
 st.title("📄🔍 KnowledgeWeaver-V1")
 st.markdown("### Advanced Document Management with Multi-format Support and Filtering")
 
-# Add navigation links
-st.markdown("""
-<div style='display: flex; gap: 1rem; margin-bottom: 1rem;'>
-    <a href='/' style='text-decoration: none;'>
-        <div style='background-color: #4CAF50; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
-            📁 Document Management
-        </div>
-    </a>
-    <a href='/image_analysis' style='text-decoration: none;'>
-        <div style='background-color: #2196F3; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
-            📷 Image Analysis
-        </div>
-    </a>
-    <a href='/document_comparison' style='text-decoration: none;'>
-        <div style='background-color: #9C27B0; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
-            📊 Document Comparison
-        </div>
-    </a>
-</div>
-""", unsafe_allow_html=True)
+# No login/signup buttons in the main content area
 
-# Create sidebar for filters and chat history
+# Create sidebar for login/signup
 sidebar = st.sidebar
-sidebar.title("📋 Options & History")
+sidebar.title("📋 Authentication")
 
-# Chat History Section in Sidebar
-sidebar.header("💬 Chat History")
-if st.session_state.chat_history:
-    for i, entry in enumerate(st.session_state.chat_history[-10:]):
-        with sidebar.expander(f"Q: {entry['question'][:30]}..."):
-            st.write(f"**Question:** {entry['question']}")
-            st.write(f"**Answer:** {entry['answer'][:100]}...")
-            st.write(f"**Time:** {entry['timestamp']}")
+# Add login/signup buttons to sidebar
+user = get_current_user()
+if user:
+    # User is logged in
+    sidebar.markdown(f"### 👤 {user['username']}")
+    sidebar.success("Your data will be saved permanently.")
 
-    # Clear history button
-    if sidebar.button("Clear Chat History"):
-        st.session_state.chat_history = []
-        save_chat_history([])
+    # Admin panel is only accessible by direct URL - no UI indication
+
+    # Logout button
+    if sidebar.button("🚪 Logout"):
+        logout_user()
         st.rerun()
 else:
-    sidebar.info("No chat history yet. Ask questions about your documents to build history.")
+    # User is not logged in
+    sidebar.warning("Anonymous Mode: Data will not be saved permanently")
+    if sidebar.button("🔑 Login"):
+        st.session_state.show_auth_popup = True
+        st.session_state.auth_popup_mode = "login"
+        st.rerun()
+    if sidebar.button("✏️ Sign Up"):
+        st.session_state.show_auth_popup = True
+        st.session_state.auth_popup_mode = "signup"
+        st.rerun()
 
-# Filter Section in Sidebar
-sidebar.header("🔍 Filters")
+# Add information about the app
+sidebar.markdown("---")
+sidebar.markdown("## ℹ️ About")
+sidebar.markdown("""
+This application allows you to:
+- Upload and process documents
+- Search within documents using vector search
+- Compare multiple documents
+- Analyze images using AI
+- Explore document knowledge graphs
+""")
 
-# Document Type Filter
-if 'all_file_types' in st.session_state:
-    selected_file_types = sidebar.multiselect(
-        "Filter by Document Type",
-        options=st.session_state.all_file_types,
-        default=[]
-    )
-    if selected_file_types:
-        st.session_state.filters['file_type'] = selected_file_types
+# Add chat history to sidebar
+sidebar.markdown("---")
+sidebar.markdown("## 💬 Chat History")
 
-# Document Name Filter
-if 'all_file_names' in st.session_state:
-    selected_file_names = sidebar.multiselect(
-        "Filter by Document Name",
-        options=st.session_state.all_file_names,
-        default=[]
-    )
-    if selected_file_names:
-        st.session_state.filters['file_name'] = selected_file_names
+# Create a dropdown for chat history
+if 'show_chat_history' not in st.session_state:
+    st.session_state.show_chat_history = False
 
-# Upload Date Filter
-if 'all_upload_dates' in st.session_state:
-    selected_dates = sidebar.multiselect(
-        "Filter by Upload Date",
-        options=st.session_state.all_upload_dates,
-        default=[]
-    )
-    if selected_dates:
-        st.session_state.filters['upload_date'] = selected_dates
+if sidebar.button('Show/Hide Chat History', key='toggle_chat_history'):
+    st.session_state.show_chat_history = not st.session_state.show_chat_history
 
-# Main content area
+# Display recent chat history (limited to 10 entries)
+if st.session_state.show_chat_history:
+    # Get current user
+    current_user = get_current_user()
+
+    # Only show chat history for authenticated users
+    if current_user:
+        # Filter chat history for current user
+        user_history = [entry for entry in st.session_state.chat_history
+                       if entry.get('user_id') == current_user.get('user_id')]
+
+        if user_history:
+            # Sort by timestamp in descending order (newest first)
+            sorted_history = sorted(user_history,
+                                   key=lambda x: x.get('timestamp', ''),
+                                   reverse=True)
+
+            # Display the 10 most recent entries
+            for i, entry in enumerate(sorted_history[:10]):
+                sidebar.markdown(f"**Q: {entry['question'][:50]}{'...' if len(entry['question']) > 50 else ''}**")
+                sidebar.markdown(f"A: {entry['answer'][:100]}{'...' if len(entry['answer']) > 100 else ''}")
+                sidebar.markdown(f"Sources: {', '.join(entry.get('context_sources', ['Unknown'])[:2])}")
+                sidebar.markdown(f"Time: {entry.get('timestamp', 'Unknown')}")
+                sidebar.markdown("---")
+
+            # Add a button to clear user's chat history
+            if sidebar.button("🗑️ Clear My Chat History"):
+                # Remove only this user's entries from chat history
+                st.session_state.chat_history = [entry for entry in st.session_state.chat_history
+                                               if entry.get('user_id') != current_user.get('user_id')]
+                save_chat_history(st.session_state.chat_history)
+                st.rerun()
+        else:
+            sidebar.info("No chat history available yet. Ask questions to see them appear here.")
+    else:
+        sidebar.info("Please log in to view your chat history.")
+
+# Check if user is authenticated
+if not st.session_state.authenticated:
+    # Show login/signup page
+    auth_success = render_auth_page(neo4j_url, neo4j_user, neo4j_password)
+
+    # If popup is shown, don't proceed with the rest of the app
+    if st.session_state.get("show_auth_popup", False):
+        # This ensures the popup is displayed prominently
+        st.stop()
+
+    # If not authenticated, don't show the rest of the app
+    if not auth_success:
+        st.stop()
+
+# Main content area (only shown to authenticated users)
 main_content = st.container()
 with main_content:
+    # Show navigation links for authenticated users
+    st.markdown("""
+    <div style='display: flex; gap: 1rem; margin-bottom: 1rem;'>
+        <a href='/' style='text-decoration: none;'>
+            <div style='background-color: #4CAF50; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+                📁 Document Management
+            </div>
+        </a>
+        <a href='/image_analysis' style='text-decoration: none;'>
+            <div style='background-color: #2196F3; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+                📷 Image Analysis
+            </div>
+        </a>
+        <a href='/document_comparison' style='text-decoration: none;'>
+            <div style='background-color: #9C27B0; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+                📊 Document Comparison
+            </div>
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
+
     # Create two columns for file upload and embedding model selection
     upload_col, model_col = st.columns([3, 2])
 
@@ -851,12 +938,14 @@ if "vector" in st.session_state:
                     st.markdown("### 🧠 Answer")
                     st.write(response["answer"])
 
-                    # Add to chat history
+                    # Add to chat history with user ID
+                    user = get_current_user()
                     chat_entry = {
                         "question": query,
                         "answer": response["answer"],
                         "context_sources": [chunk.metadata.get("file_name", "Unknown") for chunk in response["context"]],
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "user_id": user["user_id"] if user else None
                     }
                     st.session_state.chat_history.append(chat_entry)
                     save_chat_history(st.session_state.chat_history)

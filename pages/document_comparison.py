@@ -9,6 +9,10 @@ from datetime import datetime
 from dotenv import load_dotenv
 import difflib
 
+# Import authentication utilities
+from utils.auth_utils import initialize_auth_state, get_current_user, logout_user
+from utils.auth_components import render_auth_page
+
 # Import OpenAI for analysis
 from openai import OpenAI
 
@@ -44,7 +48,7 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-neo4j_url = os.getenv("NEO4J_URL")
+neo4j_url = os.getenv("NEO4J_URI")  # Using NEO4J_URI from .env file
 neo4j_user = os.getenv("NEO4J_USER")
 neo4j_password = os.getenv("NEO4J_PASSWORD")
 
@@ -57,6 +61,9 @@ else:
 
 # Page configuration
 st.set_page_config(page_title="Document Comparison - KnowledgeWeaver", layout="wide")
+
+# Initialize authentication state
+initialize_auth_state()
 
 # Custom CSS for better spacing and readability
 st.markdown("""
@@ -539,35 +546,131 @@ if 'comparison_chat_history' not in st.session_state:
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
-# Main page content
+# No login/signup buttons in the main content area
+
+# Check if user is authenticated
+if not st.session_state.authenticated:
+    # Show login/signup page in sidebar
+    auth_success = render_auth_page(neo4j_url, neo4j_user, neo4j_password)
+
+    # If not authenticated, don't show the rest of the app
+    if not auth_success:
+        st.stop()
+
+# Show navigation links for authenticated users
+st.markdown("""
+<div style='display: flex; gap: 1rem; margin-bottom: 1rem;'>
+    <a href='/' style='text-decoration: none;'>
+        <div style='background-color: #4CAF50; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📁 Document Management
+        </div>
+    </a>
+    <a href='/image_analysis' style='text-decoration: none;'>
+        <div style='background-color: #2196F3; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📷 Image Analysis
+        </div>
+    </a>
+    <a href='/document_comparison' style='text-decoration: none;'>
+        <div style='background-color: #9C27B0; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-align: center;'>
+            📊 Document Comparison
+        </div>
+    </a>
+</div>
+""", unsafe_allow_html=True)
+
+# Main page content (only shown to authenticated users)
 st.title("📊 Document & Image Comparison")
 st.markdown("Upload documents and images to compare them and ask questions")
 
-# Create sidebar for chat history
+# Create sidebar for login/signup
 sidebar = st.sidebar
-sidebar.title("📋 Options & History")
+sidebar.title("📋 Authentication")
 
-# Session ID display
-sidebar.markdown(f"**Session ID:** {st.session_state.session_id[:8]}")
-sidebar.markdown("*Documents processed in this session will be cleared when you close the app.*")
+# Add login/signup buttons to sidebar
+user = get_current_user()
+if user:
+    # User is logged in
+    sidebar.markdown(f"### 👤 {user['username']}")
+    sidebar.success("Your data will be saved permanently.")
 
-# Chat History Section in Sidebar
-sidebar.header("💬 Chat History")
-if st.session_state.comparison_chat_history:
-    for i, entry in enumerate(st.session_state.comparison_chat_history[-10:]):
-        with sidebar.expander(f"Q: {entry['question'][:30]}..."):
-            st.write(f"**Question:** {entry['question']}")
-            st.write(f"**Answer:** {entry['answer'][:100]}...")
-            st.write(f"**Documents:** {', '.join(entry['documents'])}")
-            st.write(f"**Time:** {entry['timestamp']}")
+    # Admin panel is only accessible by direct URL - no UI indication
+
+    # Logout button
+    if sidebar.button("🚪 Logout"):
+        logout_user()
+        st.rerun()
 else:
-    sidebar.info("No chat history yet. Ask questions about your documents to build history.")
+    # User is not logged in
+    sidebar.warning("Anonymous Mode: Data will not be saved permanently")
+    if sidebar.button("🔑 Login"):
+        st.session_state.show_auth_popup = True
+        st.session_state.auth_popup_mode = "login"
+        st.rerun()
+    if sidebar.button("✏️ Sign Up"):
+        st.session_state.show_auth_popup = True
+        st.session_state.auth_popup_mode = "signup"
+        st.rerun()
 
-# Clear history button
-if st.session_state.comparison_chat_history and sidebar.button("Clear Chat History"):
-    st.session_state.comparison_chat_history = []
-    save_comparison_chat_history([])
-    st.rerun()
+# Add information about the app
+sidebar.markdown("---")
+sidebar.markdown("## ℹ️ About")
+sidebar.markdown("""
+This application allows you to:
+- Compare multiple documents
+- Extract text from images
+- Ask questions about documents
+- Analyze similarities and differences
+""")
+
+# Add chat history to sidebar
+sidebar.markdown("---")
+sidebar.markdown("## 💬 Chat History")
+
+# Create a dropdown for chat history
+if 'show_comparison_chat_history' not in st.session_state:
+    st.session_state.show_comparison_chat_history = False
+
+if sidebar.button('Show/Hide Chat History', key='toggle_comparison_chat_history'):
+    st.session_state.show_comparison_chat_history = not st.session_state.show_comparison_chat_history
+
+# Display recent chat history (limited to 10 entries)
+if st.session_state.show_comparison_chat_history:
+    # Get current user
+    current_user = get_current_user()
+
+    # Only show chat history for authenticated users
+    if current_user:
+        # Filter chat history for current user
+        user_history = [entry for entry in st.session_state.comparison_chat_history
+                       if entry.get('user_id') == current_user.get('user_id')]
+
+        if user_history:
+            # Sort by timestamp in descending order (newest first)
+            sorted_history = sorted(user_history,
+                                   key=lambda x: x.get('timestamp', ''),
+                                   reverse=True)
+
+            # Display the 10 most recent entries
+            for i, entry in enumerate(sorted_history[:10]):
+                sidebar.markdown(f"**Q: {entry['question'][:50]}{'...' if len(entry['question']) > 50 else ''}**")
+                sidebar.markdown(f"A: {entry['answer'][:100]}{'...' if len(entry['answer']) > 100 else ''}")
+                if 'documents' in entry:
+                    doc_names = [os.path.basename(doc) for doc in entry.get('documents', [])[:2]]
+                    sidebar.markdown(f"Sources: {', '.join(doc_names)}")
+                sidebar.markdown(f"Time: {entry.get('timestamp', 'Unknown')}")
+                sidebar.markdown("---")
+
+            # Add a button to clear user's chat history
+            if sidebar.button("🗑️ Clear My Chat History", key="clear_comparison_history"):
+                # Remove only this user's entries from chat history
+                st.session_state.comparison_chat_history = [entry for entry in st.session_state.comparison_chat_history
+                                                          if entry.get('user_id') != current_user.get('user_id')]
+                save_comparison_chat_history(st.session_state.comparison_chat_history)
+                st.rerun()
+        else:
+            sidebar.info("No chat history available yet. Ask questions to see them appear here.")
+    else:
+        sidebar.info("Please log in to view your chat history.")
 
 # Create tabs for different functionalities
 tab1, tab2 = st.tabs(["Document Comparison", "Q&A"])
@@ -782,12 +885,14 @@ with tab2:
                     st.session_state.qa_result = qa_result
                     st.session_state.last_query = query
 
-                    # Add to chat history
+                    # Add to chat history with user ID
+                    user = get_current_user()
                     chat_entry = {
                         "question": query,
                         "answer": qa_result,
                         "documents": st.session_state.comparison_file_names,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "user_id": user["user_id"] if user else None
                     }
                     st.session_state.comparison_chat_history.append(chat_entry)
                     save_comparison_chat_history(st.session_state.comparison_chat_history)

@@ -46,7 +46,7 @@ KnowledgeWeaver is an advanced document management application with AI-powered s
 4. Create a `.env` file in the root directory with the following variables:
    ```
    OPENAI_API_KEY=your_openai_api_key
-   NEO4J_URL=your_neo4j_url
+   NEO4J_URI=your_neo4j_url (e.g., bolt://localhost:7687)
    NEO4J_USER=your_neo4j_username
    NEO4J_PASSWORD=your_neo4j_password
    ```
@@ -84,7 +84,7 @@ KnowledgeWeaver is an advanced document management application with AI-powered s
 ## Environment Variables
 
 - `OPENAI_API_KEY`: Your OpenAI API key
-- `NEO4J_URL`: URL for your Neo4j database
+- `NEO4J_URI`: URI for your Neo4j database (e.g., bolt://localhost:7687)
 - `NEO4J_USER`: Username for Neo4j database
 - `NEO4J_PASSWORD`: Password for Neo4j database
 

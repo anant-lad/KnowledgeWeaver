@@ -7,6 +7,10 @@ import uuid
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Import authentication utilities
+from utils.auth_utils import initialize_auth_state, get_current_user, logout_user
+from utils.auth_components import render_auth_page
+
 # Import OpenAI for image analysis
 from openai import OpenAI
 
@@ -32,6 +36,9 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
+neo4j_url = os.getenv("NEO4J_URI")
+neo4j_user = os.getenv("NEO4J_USER")
+neo4j_password = os.getenv("NEO4J_PASSWORD")
 
 # Initialize OpenAI client
 if openai_api_key:
@@ -42,6 +49,9 @@ else:
 
 # Page configuration
 st.set_page_config(page_title="Image Analysis - KnowledgeWeaver", layout="wide")
+
+# Initialize authentication state
+initialize_auth_state()
 
 # Custom CSS for better spacing and readability
 st.markdown("""
@@ -254,37 +264,111 @@ if 'image_session_id' not in st.session_state:
 if 'current_images' not in st.session_state:
     st.session_state.current_images = []
 
-# Main page content
+# No login/signup buttons in the main content area
+
+# Check if user is authenticated
+if not st.session_state.authenticated:
+    # Show login/signup page in sidebar
+    auth_success = render_auth_page(neo4j_url, neo4j_user, neo4j_password)
+
+    # If not authenticated, don't show the rest of the app
+    if not auth_success:
+        st.stop()
+
+# Main page content (only shown to authenticated users)
 st.title("🖼️ Image Analysis")
 st.markdown("Upload images for detailed AI-powered analysis")
 
-# Create sidebar for chat history
+# Create sidebar for login/signup
 sidebar = st.sidebar
-sidebar.title("📋 Options & History")
+sidebar.title("📋 Authentication")
 
-# Session ID display
-sidebar.markdown(f"**Session ID:** {st.session_state.image_session_id[:8]}")
-sidebar.markdown("*Images processed in this session will be cleared when you close the app.*")
+# Add login/signup buttons to sidebar
+user = get_current_user()
+if user:
+    # User is logged in
+    sidebar.markdown(f"### 👤 {user['username']}")
+    sidebar.success("Your data will be saved permanently.")
 
-# Chat History Section in Sidebar
-sidebar.header("💬 Analysis History")
-if st.session_state.image_chat_history:
-    for i, entry in enumerate(st.session_state.image_chat_history[-10:]):
-        with sidebar.expander(f"{entry['image_name'][:20]}..."):
-            st.write(f"**Image:** {entry['image_name']}")
-            st.write(f"**Prompt:** {entry['prompt'][:50]}...")
-            st.write(f"**Analysis:** {entry['analysis'][:100]}...")
-            st.write(f"**Time:** {entry['timestamp']}")
+    # Admin panel is only accessible by direct URL - no UI indication
+
+    # Logout button
+    if sidebar.button("🚪 Logout"):
+        logout_user()
+        st.rerun()
 else:
-    sidebar.info("No analysis history yet. Analyze images to build history.")
+    # User is not logged in
+    sidebar.warning("Anonymous Mode: Data will not be saved permanently")
+    if sidebar.button("🔑 Login"):
+        st.session_state.show_auth_popup = True
+        st.session_state.auth_popup_mode = "login"
+        st.rerun()
+    if sidebar.button("✏️ Sign Up"):
+        st.session_state.show_auth_popup = True
+        st.session_state.auth_popup_mode = "signup"
+        st.rerun()
 
-# Clear history button
-if st.session_state.image_chat_history and sidebar.button("Clear Analysis History"):
-    st.session_state.image_chat_history = []
-    save_image_chat_history([])
-    st.rerun()
+# Add information about the app
+sidebar.markdown("---")
+sidebar.markdown("## ℹ️ About")
+sidebar.markdown("""
+This application allows you to:
+- Analyze images with AI
+- Extract text from images
+- Detect objects in images
+- Save and download analysis results
+""")
 
-# Add navigation links
+# Add chat history to sidebar
+sidebar.markdown("---")
+sidebar.markdown("## 💬 Chat History")
+
+# Create a dropdown for chat history
+if 'show_image_chat_history' not in st.session_state:
+    st.session_state.show_image_chat_history = False
+
+if sidebar.button('Show/Hide Chat History', key='toggle_image_chat_history'):
+    st.session_state.show_image_chat_history = not st.session_state.show_image_chat_history
+
+# Display recent chat history (limited to 10 entries)
+if st.session_state.show_image_chat_history:
+    # Get current user
+    current_user = get_current_user()
+
+    # Only show chat history for authenticated users
+    if current_user:
+        # Filter chat history for current user
+        user_history = [entry for entry in st.session_state.image_chat_history
+                       if entry.get('user_id') == current_user.get('user_id')]
+
+        if user_history:
+            # Sort by timestamp in descending order (newest first)
+            sorted_history = sorted(user_history,
+                                   key=lambda x: x.get('timestamp', ''),
+                                   reverse=True)
+
+            # Display the 10 most recent entries
+            for i, entry in enumerate(sorted_history[:10]):
+                sidebar.markdown(f"**Image: {entry.get('image_name', 'Unknown')[:30]}{'...' if len(entry.get('image_name', 'Unknown')) > 30 else ''}**")
+                sidebar.markdown(f"Type: {entry.get('type', 'Unknown analysis')}")
+                sidebar.markdown(f"Prompt: {entry.get('prompt', 'No prompt')[:50]}{'...' if len(entry.get('prompt', 'No prompt')) > 50 else ''}")
+                sidebar.markdown(f"Analysis: {entry.get('analysis', 'No analysis')[:100]}{'...' if len(entry.get('analysis', 'No analysis')) > 100 else ''}")
+                sidebar.markdown(f"Time: {entry.get('timestamp', 'Unknown')}")
+                sidebar.markdown("---")
+
+            # Add a button to clear user's chat history
+            if sidebar.button("🗑️ Clear My Chat History", key="clear_image_history"):
+                # Remove only this user's entries from chat history
+                st.session_state.image_chat_history = [entry for entry in st.session_state.image_chat_history
+                                                     if entry.get('user_id') != current_user.get('user_id')]
+                save_image_chat_history(st.session_state.image_chat_history)
+                st.rerun()
+        else:
+            sidebar.info("No chat history available yet. Analyze images to see results appear here.")
+    else:
+        sidebar.info("Please log in to view your chat history.")
+
+# Show navigation links for authenticated users
 st.markdown("""
 <div style='display: flex; gap: 1rem; margin-bottom: 1rem;'>
     <a href='/' style='text-decoration: none;'>
@@ -353,13 +437,15 @@ with tab1:
                             # Save results
                             result_file = save_analysis_results(uploaded_file.name, analysis_prompt, analysis_result, tmp_path)
 
-                            # Add to chat history
+                            # Add to chat history with user ID
+                            user = get_current_user()
                             chat_entry = {
                                 "image_name": uploaded_file.name,
                                 "prompt": analysis_prompt,
                                 "analysis": analysis_result,
                                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "type": "general_analysis"
+                                "type": "general_analysis",
+                                "user_id": user["user_id"] if user else None
                             }
                             st.session_state.image_chat_history.append(chat_entry)
                             save_image_chat_history(st.session_state.image_chat_history)
@@ -482,13 +568,15 @@ with tab2:
                                 tmp_path
                             )
 
-                            # Add to chat history
+                            # Add to chat history with user ID
+                            user = get_current_user()
                             chat_entry = {
                                 "image_name": uploaded_file.name,
                                 "prompt": f"Text extraction using {method_used}",
                                 "analysis": extraction_result,
                                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "type": "text_extraction"
+                                "type": "text_extraction",
+                                "user_id": user["user_id"] if user else None
                             }
                             st.session_state.image_chat_history.append(chat_entry)
                             save_image_chat_history(st.session_state.image_chat_history)
@@ -595,13 +683,15 @@ with tab3:
                             # Save results
                             result_file = save_analysis_results(uploaded_file.name, detection_prompt, detection_result, tmp_path)
 
-                            # Add to chat history
+                            # Add to chat history with user ID
+                            user = get_current_user()
                             chat_entry = {
                                 "image_name": uploaded_file.name,
                                 "prompt": detection_prompt,
                                 "analysis": detection_result,
                                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "type": "object_detection"
+                                "type": "object_detection",
+                                "user_id": user["user_id"] if user else None
                             }
                             st.session_state.image_chat_history.append(chat_entry)
                             save_image_chat_history(st.session_state.image_chat_history)
