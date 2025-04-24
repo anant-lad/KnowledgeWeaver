@@ -1,0 +1,12 @@
+streamlit
+python-dotenv
+neo4j
+langchain
+openai
+PyPDF2
+python-docx
+Pillow
+pytesseract
+networkx
+pyvis
+nltk
